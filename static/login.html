@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 · AI 字幕工作台</title>
+<style>
+  :root { --bg:#0f1218; --panel:#161b24; --panel-2:#1c2230; --border:#2a3242; --text:#e6e9ef; --muted:#8b95a7; --accent:#4f8cff; --accent-2:#7c5cff; --ok:#38c172; --err:#ef5b5b; --warn:#f6ad3c; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Roboto, sans-serif;
+    background: radial-gradient(1200px 600px at 20% -10%, #1b2440 0, transparent 60%), var(--bg); color: var(--text);
+    display: grid; place-items: center; font-size: 14px; padding: 20px; }
+  .card { width: min(400px, 100%); background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 28px; box-shadow: 0 20px 60px #0008; }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+  .logo { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; background: linear-gradient(135deg, var(--accent), var(--accent-2)); font-weight: 700; }
+  .brand .t { font-weight: 600; font-size: 16px; }
+  .brand .s { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  h1 { font-size: 18px; margin: 0 0 6px; }
+  .lead { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 0 0 18px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 5px; }
+  input[type=text], input[type=password] { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 10px 11px; font-size: 14px; outline: none; }
+  input:focus { border-color: var(--accent); }
+  .row { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; }
+  .chk { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; cursor: pointer; }
+  button { width: 100%; margin-top: 18px; background: var(--accent); color: #fff; border: 0; border-radius: 9px; padding: 11px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  button:hover:not(:disabled) { background: #3f7bef; }
+  button:disabled { opacity: .6; cursor: default; }
+  .msg { min-height: 18px; margin-top: 12px; font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; }
+  .msg.err { color: var(--err); } .msg.ok { color: var(--ok); }
+  .foot { color: var(--muted); font-size: 11.5px; margin-top: 18px; line-height: 1.6; }
+  code { font-family: ui-monospace, Menlo, Consolas, monospace; background: var(--panel-2); border-radius: 4px; padding: 1px 5px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main class="card">
+  <div class="brand">
+    <div class="logo">CC</div>
+    <div><div class="t">AI 字幕工作台</div><div class="s">翻译 · 润色 · 编辑</div></div>
+  </div>
+
+  <form id="setupForm" hidden autocomplete="on">
+    <h1>设置用户名和密码</h1>
+    <label for="su">用户名</label>
+    <input type="text" id="su" autocomplete="username" maxlength="32" required autofocus>
+    <label for="sp">密码</label>
+    <input type="password" id="sp" autocomplete="new-password" minlength="6" maxlength="128" required>
+    <label for="sp2">再次输入密码</label>
+    <input type="password" id="sp2" autocomplete="new-password" minlength="6" maxlength="128" required>
+    <button type="submit" id="setupBtn">完成设置并进入</button>
+    <div class="msg" id="setupMsg"></div>
+  </form>
+
+  <form id="loginForm" hidden autocomplete="on">
+    <h1>登录</h1>
+    <p class="lead">请输入设置时的用户名和密码。</p>
+    <label for="lu">用户名</label>
+    <input type="text" id="lu" autocomplete="username" maxlength="32" required>
+    <label for="lp">密码</label>
+    <input type="password" id="lp" autocomplete="current-password" maxlength="128" required>
+    <div class="row"><label class="chk"><input type="checkbox" id="remember" checked> 在此设备保持登录 30 天</label></div>
+    <button type="submit" id="loginBtn">登录</button>
+    <div class="msg" id="loginMsg"></div>
+    <div class="foot">忘记密码：在服务器上执行<br><code>sudo -u ai-subtitle /opt/ai-subtitle/.venv/bin/python -m app.auth reset</code><br>（在 <code>/opt/ai-subtitle</code> 目录下），然后重新打开本页设置。</div>
+  </form>
+
+  <div class="msg" id="loadMsg">正在检查登录状态…</div>
+</main>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const params = new URLSearchParams(location.search);
+  const next = (() => { const n = params.get('next') || '/'; return n.startsWith('/') && !n.startsWith('//') ? n : '/'; })();
+  const go = () => location.replace(next);
+  const msg = (el, text, kind = '') => { el.textContent = text; el.className = 'msg ' + kind; };
+  async function post(url, body) {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), credentials: 'same-origin' });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { const e = new Error(j.error || j.detail || ('HTTP ' + r.status)); e.status = r.status; throw e; }
+    return j;
+  }
+  async function init() {
+    let st;
+    try { st = await (await fetch('/api/auth/status', { credentials: 'same-origin' })).json(); }
+    catch (e) { msg($('loadMsg'), '无法连接服务器：' + e.message, 'err'); return; }
+    if (st.authenticated) return go();
+    $('loadMsg').hidden = true;
+    if (!st.configured) { $('setupForm').hidden = false; $('su').focus(); }
+    else { $('loginForm').hidden = false; $('lu').focus(); if (params.get('reason') === 'expired') msg($('loginMsg'), '登录已失效，请重新登录', 'err'); }
+  }
+  $('setupForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const u = $('su').value.trim(), p = $('sp').value, p2 = $('sp2').value;
+    if (!u || /\s/.test(u)) return msg($('setupMsg'), '用户名不能为空，也不能包含空格', 'err');
+    if (p.length < 6) return msg($('setupMsg'), '密码至少 6 位', 'err');
+    if (p !== p2) return msg($('setupMsg'), '两次输入的密码不一致', 'err');
+    $('setupBtn').disabled = true; msg($('setupMsg'), '正在保存…');
+    try { await post('/api/auth/setup', { username: u, password: p, remember: true }); msg($('setupMsg'), '设置完成，正在进入…', 'ok'); go(); }
+    catch (err) {
+      $('setupBtn').disabled = false;
+      if (err.status === 409) { msg($('setupMsg'), err.message, 'err'); setTimeout(() => location.reload(), 1200); }
+      else msg($('setupMsg'), err.message, 'err');
+    }
+  });
+  $('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $('loginBtn').disabled = true; msg($('loginMsg'), '正在登录…');
+    try { await post('/api/auth/login', { username: $('lu').value.trim(), password: $('lp').value, remember: $('remember').checked }); go(); }
+    catch (err) { $('loginBtn').disabled = false; msg($('loginMsg'), err.message, 'err'); $('lp').select(); }
+  });
+  init();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+node_modules
+dist
+deploy/last-deploy.log
+deploy/*.log
+deploy/*.json
+data/
+# 含内网地址、私钥路径等个人信息，只留在本机，不进公开仓库
+CLAUDE.md
+.claude/
+deploy/target.conf

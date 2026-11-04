@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 字幕工作台 · 翻译 / 润色 / 编辑</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">CC</span>
+    <div>
+      <div class="title">AI 字幕工作台</div>
+      <div class="subtitle"><span id="fileInfo">未加载文件 · 支持 SRT / VTT / ASS / SSA</span> <span class="sync" id="syncState"></span></div>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <input type="file" id="fileInput" accept=".srt,.vtt,.ass,.ssa,.txt" hidden>
+    <button class="btn" id="openBtn">📂 打开字幕</button>
+    <button class="btn" id="exportBtn" disabled>⬇ 导出</button>
+    <label class="active-model" title="当前用于翻译 / 润色的模型配置">
+      <span>模型</span>
+      <select id="activeProfile"></select>
+    </label>
+    <button class="btn ghost" id="settingsBtn">⚙ 模型设置</button>
+    <button class="btn ghost" id="accountBtn" title="账户：修改密码 / 退出登录">👤 <span id="accountName"></span></button>
+    <button class="btn ghost" id="helpBtn">?</button>
+  </div>
+</header>
+
+<main class="layout">
+  <!-- 左侧：翻译任务面板 -->
+  <aside class="panel side">
+    <h3>翻译 / 润色任务</h3>
+    <div class="field">
+      <label>模式 <small>翻译、润色可同时选</small></label>
+      <div class="seg multi" id="modeSeg" role="group" aria-label="处理模式">
+        <button type="button" data-v="translate" class="on" aria-pressed="true">翻译</button>
+        <button type="button" data-v="polish" aria-pressed="false">润色</button>
+        <button type="button" data-v="none" aria-pressed="false" title="不使用 AI：只调整时间轴或手动修改字幕">仅编辑</button>
+      </div>
+      <div class="field-tip" id="modeHint"></div>
+    </div>
+    <div class="field two">
+      <div>
+        <label>源语言</label>
+        <input list="langList" id="srcLang" value="自动检测">
+      </div>
+      <div>
+        <label>目标语言</label>
+        <input list="langList" id="tgtLang" value="中文（简体）">
+      </div>
+    </div>
+    <datalist id="langList"></datalist>
+    <div class="field">
+      <label>语气风格</label>
+      <select id="tone">
+        <option value="natural">自然口语</option>
+        <option value="concise">精炼字幕风</option>
+        <option value="formal">正式书面</option>
+        <option value="literal">贴近字面</option>
+        <option value="humorous">轻松幽默</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>术语表 <small>每行一条：原文=译文</small></label>
+      <textarea id="glossary" rows="3" placeholder="Jarvis=贾维斯&#10;the Force=原力"></textarea>
+    </div>
+    <div class="field">
+      <label>额外要求</label>
+      <textarea id="instructions" rows="3" placeholder="例如：人名保留英文；口语化一些；不要用“您”"></textarea>
+    </div>
+    <div class="field">
+      <label>字幕排版</label>
+      <label class="chk"><input type="checkbox" id="lineMerge"> 多行合并为一行，超宽才换行</label>
+      <div class="inline line-width">
+        <span class="lw-label">宽度上限</span>
+        <input type="number" id="lineWidth" min="16" max="120" step="2">
+        <span class="lw-hint" id="lineWidthHint"></span>
+      </div>
+      <div class="field-tip">导入字幕和 AI 译文会自动整理。双语字幕会按语言分成两行，中文一行、外文一行。按半角计：汉字算 2，字母和空格算 1。已有内容可点下方「整理换行」。</div>
+      <label class="chk skip-lyrics"><input type="checkbox" id="skipLyrics"> 忽略歌词和氛围音，不翻译</label>
+      <div class="field-tip">整条都在 ♪ ♪ 之间的歌词，或只有 [音乐]、(叹气) 这类音效描述的字幕，保留原文不送去翻译。歌词和对白混在一条里时，只保留歌词部分的原文。</div>
+    </div>
+    <div class="field two">
+      <div>
+        <label>每批条数</label>
+        <input type="number" id="batchSize" min="1" max="100" value="20">
+      </div>
+      <div>
+        <label>并发数</label>
+        <input type="number" id="concurrency" min="1" max="10" value="3">
+      </div>
+    </div>
+    <div class="field">
+      <label>运行</label>
+      <div class="btn-row wrap">
+        <button class="btn primary" id="runAllBtn" disabled>▶ 处理全部</button>
+        <button class="btn" id="runEmptyBtn" disabled>仅未处理</button>
+        <button class="btn" id="runSelBtn" disabled>仅选中</button>
+        <button class="btn danger" id="stopBtn" hidden>■ 停止</button>
+      </div>
+    </div>
+    <div class="progress" id="progressWrap" hidden>
+      <div class="bar"><div id="progressBar"></div></div>
+      <div class="progress-text" id="progressText"></div>
+    </div>
+    <div class="status" id="statusMsg"></div>
+
+    <h3 class="mt">工具</h3>
+    <div class="btn-row wrap">
+      <button class="btn small" id="shiftBtn" disabled>⏱ 时间偏移</button>
+      <button class="btn small" id="findBtn" disabled>🔍 查找替换</button>
+      <button class="btn small" id="reflowBtn" disabled>↩ 整理换行</button>
+      <button class="btn small" id="swapBtn" disabled>译文→原文</button>
+      <button class="btn small" id="clearTransBtn" disabled>清空译文</button>
+      <button class="btn small" id="retryErrBtn" disabled>重试失败项</button>
+    </div>
+    <div class="hint">编辑内容会自动保存到服务器，换一台电脑登录可以接着编辑；按 <kbd>Ctrl/⌘ + S</kbd> 快速导出。</div>
+  </aside>
+
+  <!-- 右侧：字幕表格 -->
+  <section class="panel table-wrap">
+    <div class="dropzone" id="dropzone">
+      <div>
+        <div class="big">把字幕文件拖到这里</div>
+        <div>或点击右上角「打开字幕」 · 支持 .srt .vtt .ass .ssa</div>
+      </div>
+    </div>
+    <div class="table-tools" id="tableTools" hidden>
+      <label class="chk"><input type="checkbox" id="selectAll"> 全选</label>
+      <span class="sep"></span>
+      <span class="counter" id="counter"></span>
+      <span class="sep"></span>
+      <label class="chk"><input type="checkbox" id="onlyEmpty"> 只看未翻译</label>
+      <label class="chk"><input type="checkbox" id="onlyErr"> 只看失败</label>
+      <input type="search" id="filterText" placeholder="筛选文本…">
+    </div>
+    <div class="grid-head" id="gridHead" hidden>
+      <div></div><div>#</div><div>时间轴</div><div>原文</div><div>译文</div><div></div>
+    </div>
+    <div class="grid" id="grid"></div>
+  </section>
+</main>
+
+<!-- 模型设置 -->
+<dialog id="settingsDlg" class="dlg wide">
+  <form method="dialog">
+    <h3>模型设置（OpenAI 兼容接口）</h3>
+    <div class="profiles-layout">
+    <aside class="profile-side">
+      <div class="profile-side-head">
+        <span>已保存的配置</span>
+        <span class="grow"></span>
+        <button type="button" class="btn small" id="newProfileBtn" title="新建一个空白配置">＋ 新建</button>
+        <button type="button" class="btn small" id="dupProfileBtn" title="复制当前配置">复制</button>
+      </div>
+      <div class="profile-list" id="profileList" role="listbox"></div>
+      <div class="field-tip">点击切换要编辑的配置；「使用中」的配置用于翻译，也可以在顶栏快速切换。</div>
+      <div class="field-tip">配置保存在服务器上，所有电脑的浏览器打开都相同。API Key 只保存在服务器，浏览器里只显示遮挡后的提示。</div>
+    </aside>
+    <div class="profile-form">
+    <div class="field">
+      <label>配置名称 <small>留空则自动命名</small></label>
+      <input id="profileName" maxlength="40" placeholder="例如：Groq 快速 / 硅基流动 Qwen">
+    </div>
+    <div class="field">
+      <label>服务商预设</label>
+      <select id="preset"></select>
+    </div>
+    <div class="field">
+      <label>API 地址（Base URL）</label>
+      <input id="baseUrl" placeholder="https://api.groq.com/openai/v1">
+    </div>
+    <div class="field">
+      <label>API Key <small id="serverKeyHint"></small> <small class="key-state" id="keyState"></small></label>
+      <div class="inline">
+        <input id="apiKey" type="password" placeholder="sk-…（保存在服务器，不会再显示在浏览器）" autocomplete="new-password">
+        <button type="button" class="btn small" id="toggleKeyBtn" title="显示 / 隐藏正在输入的密钥">显示</button>
+        <button type="button" class="btn small" id="clearKeyBtn" title="保存时清除服务器上的这个 Key" hidden>清除</button>
+        <a class="btn small link-btn" id="keyLink" href="#" target="_blank" rel="noopener noreferrer" title="打开服务商官网的 API Key 页面">获取 Key ↗</a>
+      </div>
+      <div class="field-tip" id="keyTip"></div>
+    </div>
+    <div class="field">
+      <label>模型</label>
+      <div class="inline">
+        <div class="combo" id="modelCombo">
+          <input id="model" placeholder="openai/gpt-oss-120b" autocomplete="off" spellcheck="false">
+          <button type="button" class="combo-toggle" id="modelToggle" title="展开模型列表" tabindex="-1">▾</button>
+          <div class="combo-list" id="modelMenu" role="listbox" hidden></div>
+        </div>
+        <button type="button" class="btn small" id="fetchModelsBtn">获取列表</button>
+      </div>
+    </div>
+    <div class="field three">
+      <div><label>温度 <button type="button" class="info-btn" data-tip="tempTip" aria-label="温度是什么意思" aria-expanded="false" title="点击查看说明">i</button></label><input type="number" id="temperature" step="0.1" min="0" max="2" value="0.3"></div>
+      <div><label>超时(秒)</label><input type="number" id="timeout" min="10" max="600" value="120"></div>
+      <div><label>JSON 模式</label><select id="jsonMode"><option value="0">关闭</option><option value="1">开启</option></select></div>
+    </div>
+    <div class="field">
+      <label>深度思考</label>
+      <select id="thinking"><option value="off">关闭</option></select>
+      <div class="field-tip" id="thinkingNote"></div>
+      <div class="field-tip warn-tip" id="thinkingWarn"></div>
+    </div>
+    <div class="status" id="settingsMsg"></div>
+    </div>
+    </div>
+    <div class="info-pop" id="tempTip" role="dialog" aria-label="温度说明" hidden>
+      <div class="info-pop-head"><b>温度（temperature）</b><button type="button" class="info-close" aria-label="关闭">×</button></div>
+      <p>控制模型输出的随机程度：数值越低越稳定、越保守，越高用词越多变。</p>
+      <table class="info-table">
+        <tr><th>温度</th><th>效果</th><th>适合</th></tr>
+        <tr><td>0 – 0.3</td><td>很稳定，同一句每次译法几乎一样</td><td>字幕翻译、术语统一</td></tr>
+        <tr><td>0.4 – 0.7</td><td>有一些变化，表达更灵活</td><td>润色、口语化或幽默风格</td></tr>
+        <tr><td>0.8 以上</td><td>变化大，可能出现意外译法</td><td>不建议用于字幕</td></tr>
+      </table>
+      <ul>
+        <li><b>温度低</b>：人名、地名前后译法一致，输出格式也更稳定。</li>
+        <li><b>温度高</b>：同一个名字可能前后译得不一样，也更容易不按格式输出，导致批次解析失败需要重试。</li>
+        <li><b>建议</b>：默认 0.3 适合大多数情况；觉得译文死板可调到 0.5 左右；人名不统一时调低温度并配合术语表。</li>
+      </ul>
+      <p class="info-note" id="tempTipNote"></p>
+    </div>
+    <div class="dlg-actions">
+      <button type="button" class="btn danger-ghost" id="deleteProfileBtn">删除此配置</button>
+      <button type="button" class="btn" id="testBtn">测试连接</button>
+      <span class="grow"></span>
+      <button type="button" class="btn ghost" id="settingsCancel">取消</button>
+      <button type="button" class="btn" id="settingsSave">保存</button>
+      <button type="button" class="btn primary" id="settingsSaveUse">保存并使用</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 导出 -->
+<dialog id="exportDlg" class="dlg">
+  <form method="dialog">
+    <h3>导出字幕</h3>
+    <div class="field">
+      <label>文件名</label>
+      <input id="exportName">
+    </div>
+    <div class="field two">
+      <div>
+        <label>格式</label>
+        <select id="exportFormat">
+          <option value="srt">SRT</option>
+          <option value="vtt">WebVTT</option>
+          <option value="ass">ASS</option>
+        </select>
+      </div>
+      <div>
+        <label>内容</label>
+        <select id="exportContent">
+          <option value="translation">仅译文（无译文则用原文）</option>
+          <option value="bilingual_to">双语 · 译文在上</option>
+          <option value="bilingual_ot">双语 · 原文在上</option>
+          <option value="original">仅原文</option>
+        </select>
+      </div>
+    </div>
+    <div class="field three" id="assFontFields">
+      <div>
+        <label>视频分辨率</label>
+        <select id="exportRes">
+          <option value="720">720p</option>
+          <option value="1080">1080p</option>
+          <option value="2160">4K（2160p）</option>
+        </select>
+      </div>
+      <div>
+        <label>字号</label>
+        <input type="number" id="exportFontSize" min="10" max="240" step="1">
+      </div>
+      <div>
+        <label>副字幕大小（%）</label>
+        <input type="number" id="exportScale2" min="40" max="100" step="5">
+      </div>
+    </div>
+    <div class="field-tip" id="exportFontTip"></div>
+    <div class="ass-style" id="assStyleFields">
+      <div class="as-grid">
+        <span></span><span class="as-h">字体</span><span class="as-h">文字颜色</span><span class="as-h">描边颜色</span>
+        <span class="as-l">主字幕</span>
+        <div class="as-font"><select id="assFont"></select></div>
+        <input type="color" id="assColor" value="#ffffff" title="主字幕文字颜色">
+        <input type="color" id="assOutline" value="#000000" title="主字幕描边颜色">
+        <span class="as-l sec">副字幕</span>
+        <div class="as-font sec"><select id="assFont2"></select></div>
+        <input type="color" id="assColor2" value="#ffffff" title="副字幕文字颜色">
+        <input type="color" id="assOutline2" value="#000000" title="副字幕描边颜色">
+      </div>
+      <div class="ass-preview" id="assPreview" aria-label="字幕预览">
+        <div class="pv" id="pvTop"></div>
+        <div class="pv" id="pvBottom"></div>
+      </div>
+      <div class="field-tip warn-tip font-note" id="assFontNote"></div>
+      <div class="field-tip" id="assStyleTip"></div>
+      <div class="as-actions"><button type="button" class="btn small ghost" id="assStyleReset">恢复默认样式</button></div>
+    </div>
+    <div class="dlg-actions">
+      <span class="grow"></span>
+      <button type="button" class="btn ghost" id="exportCancel">取消</button>
+      <button type="button" class="btn primary" id="exportOk">下载</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 时间偏移 -->
+<dialog id="shiftDlg" class="dlg">
+  <form method="dialog">
+    <h3>时间轴偏移</h3>
+    <div class="field two">
+      <div><label>偏移量（秒）</label><input type="text" id="shiftSec" value="0" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="例如 1.5 或 -0.250"></div>
+      <div><label>范围</label><select id="shiftScope"><option value="all">全部</option><option value="sel">仅选中</option></select></div>
+    </div>
+    <div class="field-tip">正数让字幕延后出现，负数让字幕提前出现；最多 3 位小数（精确到毫秒）。</div>
+    <div class="status" id="shiftMsg"></div>
+    <div class="dlg-actions">
+      <span class="grow"></span>
+      <button type="button" class="btn ghost" id="shiftCancel">取消</button>
+      <button type="button" class="btn primary" id="shiftOk">应用</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 查找替换 -->
+<dialog id="findDlg" class="dlg">
+  <form method="dialog">
+    <h3>查找替换</h3>
+    <div class="field two">
+      <div><label>查找</label><input id="findText"></div>
+      <div><label>替换为</label><input id="replaceText"></div>
+    </div>
+    <div class="field two">
+      <div><label>作用于</label><select id="findField"><option value="translation">译文</option><option value="text">原文</option></select></div>
+      <div><label>选项</label><label class="chk"><input type="checkbox" id="findCase"> 区分大小写</label></div>
+    </div>
+    <div class="status" id="findMsg"></div>
+    <div class="dlg-actions">
+      <span class="grow"></span>
+      <button type="button" class="btn ghost" id="findCancel">关闭</button>
+      <button type="button" class="btn primary" id="replaceAllBtn">全部替换</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 账户 -->
+<dialog id="accountDlg" class="dlg">
+  <form method="dialog" id="accountForm" autocomplete="on">
+    <h3>账户</h3>
+    <p class="hint" style="margin-top:0">当前登录：<b id="accountUser"></b>。修改密码后，其他设备需要重新登录。</p>
+    <div class="field"><label>当前密码</label><input type="password" id="accOld" autocomplete="current-password"></div>
+    <div class="field"><label>用户名 <small>可同时修改</small></label><input id="accUser" autocomplete="username" maxlength="32"></div>
+    <div class="field two">
+      <div><label>新密码（至少 6 位）</label><input type="password" id="accNew" autocomplete="new-password" maxlength="128"></div>
+      <div><label>再次输入新密码</label><input type="password" id="accNew2" autocomplete="new-password" maxlength="128"></div>
+    </div>
+    <div class="status" id="accountMsg"></div>
+    <div class="dlg-actions">
+      <button type="button" class="btn danger-ghost" id="logoutBtn">退出登录</button>
+      <span class="grow"></span>
+      <button type="button" class="btn ghost" id="accountCancel">取消</button>
+      <button type="button" class="btn primary" id="accountSave">修改密码</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 帮助 -->
+<dialog id="helpDlg" class="dlg">
+  <form method="dialog">
+    <h3>使用说明</h3>
+    <ol class="help">
+      <li>点「⚙ 模型设置」选择服务商（Groq / 硅基流动 / DeepSeek / OpenAI / Ollama…），填入 API Key 与模型名，点「测试连接」。可以保存多个配置，在顶栏「模型」下拉中随时切换当前使用哪一个。</li>
+      <li>打开或拖入字幕文件（SRT / VTT / ASS / SSA），时间轴会原样保留。</li>
+      <li>左侧选择模式（翻译、润色可同时选：先翻译再对照原文润色）与目标语言，点运行按钮。可随时「停止」，失败的批次可「重试失败项」。</li>
+      <li>直接在表格中修改原文 / 译文 / 时间；每行的「AI」按钮可单独重新生成该行。</li>
+      <li>导出时可选 SRT / VTT / ASS，支持双语字幕。</li>
+    </ol>
+    <p class="hint">「译文→原文」可以把当前译文变成原文，用于二次翻译到另一种语言或再次润色。模型配置和任务设置保存在服务器上，任何电脑的浏览器打开都相同；API Key 只保存在服务器，不会发回浏览器。正在编辑的字幕也保存在服务器上，换一台电脑登录可以接着编辑；多台电脑同时打开时会自动同步，同时修改不同的行不会互相覆盖。</p>
+    <div class="dlg-actions"><span class="grow"></span><button class="btn primary">知道了</button></div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast"></div>
+<script src="reflow.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

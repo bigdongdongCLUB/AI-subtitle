@@ -1,0 +1,16 @@
+#!/usr/bin/expect -f
+# 用密码执行 ssh / scp：DEPLOY_PASS=xxx remote.exp ssh root@host 'cmd'
+set timeout -1
+set pass $env(DEPLOY_PASS)
+set sent 0
+spawn {*}$argv
+expect {
+  -re "\\(yes/no(/\\\[fingerprint\\\])?\\)" { send "yes\r"; exp_continue }
+  -re "(?i)password:" {
+    if {$sent} { puts "\n!! 密码错误"; exit 5 }
+    set sent 1; send -- "$pass\r"; exp_continue
+  }
+  eof
+}
+lassign [wait] pid spawnid os_error value
+exit $value

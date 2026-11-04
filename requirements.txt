@@ -1,0 +1,6 @@
+fastapi>=0.104
+uvicorn[standard]>=0.24
+httpx>=0.25
+python-multipart>=0.0.6
+charset-normalizer>=3.0
+pydantic>=1.10

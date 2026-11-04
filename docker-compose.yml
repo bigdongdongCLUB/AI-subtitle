@@ -1,0 +1,11 @@
+services:
+  ai-subtitle:
+    build: .
+    container_name: ai-subtitle
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/srv/data   # 模型配置与 API Key
