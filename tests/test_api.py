@@ -303,6 +303,18 @@ async def test_settings_store():
             assert "Style: Secondary,BadName,33,&H00FFFFFF," in r.text, r.text
             t = (await c.put("/api/settings/task", json={"task": {"ass_style": {"font": "KaiTi", "color": "#123456", "color2": "x"}}})).json()
             assert t["value"]["ass_style"]["font"] == "KaiTi" and t["value"]["ass_style"]["color"] == "#123456" and t["value"]["ass_style"]["color2"] == "#FFFFFF", t
+            # 导入 ASS 只记住样式偏好，忽略旧客户端发送的画布字号。
+            await c.put("/api/settings/task", json={"task": {
+                "ass_import_font_size": 24, "ass_import_style": {"font": "Songti SC", "color": "#ffcc00"},
+                "font_size": 5.5,
+            }})
+            prefs = (await c.get("/api/settings")).json()["task"]["value"]
+            assert "ass_import_font_size" not in prefs and prefs["font_size"] == 5.5, prefs
+            assert prefs["ass_import_style"] == {"font": "Songti SC", "color": "#FFCC00"}, prefs
+            assert prefs["ass_style"]["font"] == "KaiTi", prefs
+            await c.put("/api/settings/task", json={"task": {"ass_import_style": {}}})
+            prefs = (await c.get("/api/settings")).json()["task"]["value"]
+            assert prefs["ass_import_style"] == {} and prefs["font_size"] == 5.5, prefs
             assert (await c.get("/api/settings")).json()["task"]["value"]["glossary"] == "a=甲"
             # 浏览器只发 profile_id，服务器用保存的 Key
             items = [{"id": 1, "text": "Hi"}]

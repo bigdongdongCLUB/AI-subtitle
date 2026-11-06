@@ -25,7 +25,7 @@ SUDO=""; [ "$RUSER" != root ] && SUDO="sudo -n"
   echo "### $(date '+%F %T') 部署到 $TARGET 端口 $PORT"
   TAR=$(mktemp -t ai-subtitle).tar.gz
   COPYFILE_DISABLE=1 tar --no-mac-metadata -czf "$TAR" \
-    --exclude .git --exclude .venv --exclude .claude --exclude __pycache__ --exclude '*.pyc' --exclude .env \
+    --exclude .git --exclude .venv --exclude .claude --exclude ./CLAUDE.md --exclude __pycache__ --exclude '*.pyc' --exclude .env \
     --exclude "deploy/*.log" --exclude "deploy/*.json" --exclude deploy/target.conf --exclude ./data --exclude .DS_Store .
   echo "打包完成: $(du -h "$TAR" | cut -f1)"
 

@@ -1279,7 +1279,7 @@
       $(selId).addEventListener('change', updateAssPreview);
     }
     Object.values(COLOR_CTRL).forEach(id => $(id).addEventListener('input', updateAssPreview));
-    $('assStyleReset').addEventListener('click', () => { setAssStyle(exp.imported ? exp.fileStyle : DEFAULT_ASS_STYLE); updateExportFontUI(); saveExportPrefs(); });
+    $('assStyleReset').addEventListener('click', () => { setAssStyle(exp.imported ? exp.fileStyle : DEFAULT_ASS_STYLE); updateExportFontUI(); saveExportPrefs('assStyleReset'); });
   }
   // 设置下拉框：列表里有就直接选；已移除的字体换成对应的苹果字体；
   // 导入的 ASS 里其他字体作为「原文件字体」保留；其余用 Arial
@@ -1287,12 +1287,9 @@
     const sel = $(FONT_CTRL[key]);
     font = String(font || '').trim();
     const known = (f) => ASS_FONTS.some(([v]) => v === f);
-    let extra = '';
-    if (!known(font)) {
-      if (FONT_REPLACE[font]) font = FONT_REPLACE[font];
-      else if (font && exp.imported && exp.fileStyle && font === exp.fileStyle.font) extra = font;
-      else font = 'Arial';
-    }
+    const original = exp.fileStyle?.[key];
+    const extra = original && !known(original) && !Object.hasOwn(FONT_REPLACE, original) ? original : '';
+    if (!known(font) && font !== extra) font = Object.hasOwn(FONT_REPLACE, font) ? FONT_REPLACE[font] : 'Arial';
     sel.innerHTML = fontOptions(extra);
     sel.value = font;
   }
@@ -1428,13 +1425,14 @@
     exp.res = detectRes(p.filename) || (RES_LIST.includes(+state.task.export_res) ? +state.task.export_res : 1080);
     exp.detected = !!detectRes(p.filename);
     $('exportRes').value = exp.res;
-    $('exportFontSize').value = exp.imported ? exp.importedSize : Math.round(exp.base * exp.res / 1080);
+    $('exportFontSize').value = exp.imported ? exp.importedSize
+      : Math.min(240, Math.max(10, Math.round(exp.base * exp.res / 1080)));
     $('exportScale2').value = state.task.font_scale2 || 75;
     exp.bilingualSource = SubReflow.detectBilingual(p.cues.map(c => c.text));
-    // 字体和颜色：导入的 ASS 用它自己的主要样式，否则用上次保存的偏好
+    // 导入的 ASS 默认用原文件样式，用户修改过的项目用保存的偏好覆盖
     exp.fileStyle = exp.imported ? { font: hi.font || 'Arial', color: hi.color || '#FFFFFF', outline_color: hi.outline || '#000000',
       font2: hi.font || 'Arial', color2: hi.color || '#FFFFFF', outline_color2: hi.outline || '#000000' } : null;
-    setAssStyle(exp.imported ? exp.fileStyle : (state.task.ass_style || DEFAULT_ASS_STYLE));
+    setAssStyle(exp.imported ? { ...exp.fileStyle, ...state.task.ass_import_style } : state.task.ass_style);
     updateExportFontUI();
     $('exportDlg').showModal();
   }
@@ -1471,18 +1469,18 @@
       const fs = parseInt($('exportFontSize').value);
       if (fs > 0) exp.base = fs * 1080 / exp.res;     // 以当前字号为准换算
       exp.res = parseInt($('exportRes').value); exp.detected = false;
-      if (!exp.imported) $('exportFontSize').value = Math.round(exp.base * exp.res / 1080);
+      if (!exp.imported) $('exportFontSize').value = Math.min(240, Math.max(10, Math.round(exp.base * exp.res / 1080)));
       updateExportFontUI();
     });
     $('exportFontSize').addEventListener('input', () => {
       const fs = parseInt($('exportFontSize').value);
-      if (fs > 0 && !exp.imported) exp.base = fs * 1080 / exp.res;
+      if (fs > 0 && !exp.imported) exp.base = Math.min(240, Math.max(10, fs)) * 1080 / exp.res;
       updateExportFontUI();
     });
     $('exportScale2').addEventListener('input', updateExportFontUI);
     $('exportContent').addEventListener('change', updateAssPreview);
   }
-  // 记住导出参数。字号按 1080p 折算保存；导入 ASS 的画布、字号和样式是它自己的，不保存。
+  // 导入 ASS 的字号以原文件为准，字体和颜色只保存用户改过的项目。
   // 格式和内容只在用户亲自改动时保存（id 是被改动的控件），打开时的自动选择不算。
   function saveExportPrefs(id) {
     const ass = $('exportFormat').value === 'ass';
@@ -1490,10 +1488,22 @@
     const changed = {};
     if (id === 'exportFormat') changed.export_format = $('exportFormat').value;
     if (id === 'exportContent') changed.export_content = $('exportContent').value;
-    if (sc >= 40 && sc <= 100) changed.font_scale2 = sc;
+    if (id === 'exportScale2' && sc > 0) changed.font_scale2 = Math.min(100, Math.max(40, sc));
+    if (ass && exp.imported) {
+      const key = Object.keys(DEFAULT_ASS_STYLE).find(k => (FONT_CTRL[k] || COLOR_CTRL[k]) === id);
+      if (key) {
+        const style = { ...state.task.ass_import_style };
+        const value = getAssStyle()[key];
+        // 「原文件字体」随字幕文件变化，不能当作通用的字体偏好保存。
+        if (FONT_CTRL[key] && !ASS_FONTS.some(([font]) => font === value)) delete style[key];
+        else style[key] = value;
+        changed.ass_import_style = style;
+      }
+      if (id === 'assStyleReset') changed.ass_import_style = {};
+    }
     if (ass && !exp.imported) {
-      changed.export_res = exp.res;
-      changed.font_size = Math.round(Math.min(120, Math.max(10, exp.base)));
+      if (id === 'exportRes') changed.export_res = exp.res;
+      if (id === 'exportFontSize') changed.font_size = exp.base;
       changed.ass_style = getAssStyle();
     }
     const diff = Object.entries(changed).some(([k, v]) => JSON.stringify(state.task[k]) !== JSON.stringify(v));
@@ -1502,8 +1512,9 @@
   async function doExport() {
     const p = state.project;
     const ass = $('exportFormat').value === 'ass';
-    const fs = Math.min(240, Math.max(10, parseInt($('exportFontSize').value) || Math.round(exp.base * exp.res / 1080)));
-    const sc = Math.min(100, Math.max(40, parseInt($('exportScale2').value) || 75));
+    const fs = Math.min(240, Math.max(10, parseInt($('exportFontSize').value) ||
+      (exp.imported ? exp.importedSize : Math.round(exp.base * exp.res / 1080))));
+    const sc = Math.min(100, Math.max(40, parseInt($('exportScale2').value) || state.task.font_scale2 || 75));
     const style = ass ? getAssStyle() : null;
     saveExportPrefs();
     // 原文件是双语字幕、导出「仅原文」的 ASS：把每条拆成主字幕（第一种语言）和副字幕（第二种语言），分别套用样式

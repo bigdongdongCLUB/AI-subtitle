@@ -16,7 +16,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 PROFILE_FIELDS = ("id", "name", "preset", "base_url", "model", "temperature", "timeout", "json_mode", "thinking")
 TASK_FIELDS = ("mode", "source_lang", "target_lang", "tone", "glossary", "instructions", "batch_size", "concurrency",
                "line_merge", "line_width", "font_size", "font_scale2", "skip_lyrics", "export_res", "ass_style",
-               "export_format", "export_content")
+               "export_format", "export_content", "ass_import_style")
 MAX_PROFILES = 50
 
 _lock = threading.Lock()
@@ -196,9 +196,19 @@ def save_task(value: Dict[str, Any]) -> Dict[str, Any]:
     for k in ("line_merge", "skip_lyrics"):
         if k in clean:
             clean[k] = bool(clean[k])
-    if "ass_style" in clean:
+    if "ass_style" in clean or "ass_import_style" in clean:
         from .subtitles import clean_style
-        clean["ass_style"] = clean_style(clean["ass_style"] if isinstance(clean["ass_style"], dict) else {})
+        for key in ("ass_style", "ass_import_style"):
+            if key in clean:
+                raw = clean[key] if isinstance(clean[key], dict) else {}
+                style = clean_style(raw)
+                clean[key] = style if key == "ass_style" else {k: v for k, v in style.items() if k in raw}
+    if "font_size" in clean:
+        try:
+            # 以 1080p 计：4K 的 10 和 720p 的 240 对应 5 和 360。
+            clean["font_size"] = min(360, max(5, float(clean["font_size"])))
+        except (TypeError, ValueError):
+            clean["font_size"] = 44
     if "export_res" in clean:
         try:
             clean["export_res"] = int(clean["export_res"]) if int(clean["export_res"]) in (720, 1080, 2160) else 1080
@@ -208,7 +218,7 @@ def save_task(value: Dict[str, Any]) -> Dict[str, Any]:
                        ("export_content", ("translation", "bilingual_to", "bilingual_ot", "original"))):
         if k in clean and clean[k] not in allowed:
             del clean[k]   # 不合法或尚未选择：保留原来的值
-    for k, lo, hi, default in (("line_width", 16, 120, 50), ("font_size", 10, 120, 44), ("font_scale2", 40, 100, 75)):
+    for k, lo, hi, default in (("line_width", 16, 120, 50), ("font_scale2", 40, 100, 75)):
         if k in clean:
             try:
                 clean[k] = max(lo, min(hi, int(float(clean[k]))))
